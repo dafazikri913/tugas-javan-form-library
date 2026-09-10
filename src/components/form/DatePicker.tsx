@@ -1,69 +1,84 @@
 ﻿import * as React from "react"
 import * as PopoverPrimitive from "@radix-ui/react-popover"
 import { DayPicker } from "react-day-picker"
-import { format } from "date-fns"
+import { format, setMonth, setYear, getMonth, getYear } from "date-fns"
 import { id as localeId } from "date-fns/locale"
 import { CalendarIcon, ChevronLeft, ChevronRight } from "lucide-react"
 import { cn } from "../../lib/utils"
 
 export interface DatePickerProps {
-  /** Nilai tanggal yang dipilih */
   value?: Date | null
-  /** Callback saat tanggal berubah */
   onChange: (date: Date | null) => void
-  /** Teks placeholder saat belum ada tanggal */
   placeholder?: string
-  /** Label di atas date picker */
   label?: string
-  /** Nonaktifkan komponen */
   disabled?: boolean
-  /** Mode readonly — tampilkan nilai tapi tidak bisa diubah */
   readOnly?: boolean
-  /** Pesan error */
   error?: string
-  /** Teks bantuan di bawah date picker */
   helperText?: string
-  /** Tanggal minimum yang bisa dipilih */
   minDate?: Date
-  /** Tanggal maksimum yang bisa dipilih */
   maxDate?: Date
-  /** Id unik komponen */
   id?: string
 }
 
-/**
- * DatePicker
- *
- * Komponen pemilih tanggal reusable menggunakan Popover + Calendar.
- * Mendukung state: default, error, disabled, readonly, dengan batasan minDate/maxDate.
- *
- * @example
- * // Default
- * const [date, setDate] = useState<Date | null>(null)
- * <DatePicker value={date} onChange={setDate} label="Tanggal Lahir" placeholder="Pilih tanggal" />
- *
- * @example
- * // Error
- * <DatePicker value={date} onChange={setDate} label="Tanggal Mulai" error="Tanggal wajib diisi" />
- *
- * @example
- * // Disabled
- * <DatePicker value={new Date()} onChange={() => {}} label="Tanggal Dibuat" disabled />
- *
- * @example
- * // Readonly
- * <DatePicker value={new Date()} onChange={() => {}} label="Tanggal Terakhir" readOnly />
- *
- * @example
- * // Dengan minDate dan maxDate
- * <DatePicker
- *   value={date}
- *   onChange={setDate}
- *   label="Jadwal"
- *   minDate={new Date()}
- *   maxDate={new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)}
- * />
- */
+const MONTHS = [
+  "Januari","Februari","Maret","April","Mei","Juni",
+  "Juli","Agustus","September","Oktober","November","Desember",
+]
+
+function buildYears(minDate?: Date, maxDate?: Date): number[] {
+  const currentYear = new Date().getFullYear()
+  const from = minDate ? getYear(minDate) : currentYear - 100
+  const to   = maxDate ? getYear(maxDate) : currentYear + 10
+  const years: number[] = []
+  for (let y = to; y >= from; y--) years.push(y)
+  return years
+}
+
+/** Custom caption with month + year dropdowns */
+function CalendarCaption({
+  displayMonth,
+  onMonthChange,
+  minDate,
+  maxDate,
+}: {
+  displayMonth: Date
+  onMonthChange: (month: Date) => void
+  minDate?: Date
+  maxDate?: Date
+}) {
+  const years = buildYears(minDate, maxDate)
+  const currentMonth = getMonth(displayMonth)
+  const currentYear  = getYear(displayMonth)
+
+  return (
+    <div className="rdp-caption-custom">
+      {/* Month dropdown */}
+      <select
+        value={currentMonth}
+        onChange={e => onMonthChange(setMonth(displayMonth, Number(e.target.value)))}
+        className="rdp-select"
+        aria-label="Pilih bulan"
+      >
+        {MONTHS.map((m, i) => (
+          <option key={m} value={i}>{m}</option>
+        ))}
+      </select>
+
+      {/* Year dropdown */}
+      <select
+        value={currentYear}
+        onChange={e => onMonthChange(setYear(displayMonth, Number(e.target.value)))}
+        className="rdp-select"
+        aria-label="Pilih tahun"
+      >
+        {years.map(y => (
+          <option key={y} value={y}>{y}</option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
 export function DatePicker({
   value,
   onChange,
@@ -77,16 +92,21 @@ export function DatePicker({
   maxDate,
   id,
 }: DatePickerProps) {
-  const [open, setOpen] = React.useState(false)
-  const generatedId = React.useId()
-  const pickerId = id || generatedId
-  const errorId = `${pickerId}-error`
+  const [open, setOpen]         = React.useState(false)
+  const [month, setMonth]       = React.useState<Date>(value ?? new Date())
+  const generatedId             = React.useId()
+  const pickerId                = id || generatedId
+  const errorId                 = `${pickerId}-error`
+  const canOpen                 = !disabled && !readOnly
 
-  const canOpen = !disabled && !readOnly
+  // Sync displayed month when value changes from outside
+  React.useEffect(() => {
+    if (value) setMonth(value)
+  }, [value])
 
   const handleSelect = (date: Date | undefined) => {
     onChange(date ?? null)
-    setOpen(false)
+    if (date) setOpen(false)
   }
 
   return (
@@ -100,7 +120,7 @@ export function DatePicker({
         </label>
       )}
 
-      <PopoverPrimitive.Root open={open} onOpenChange={canOpen ? setOpen : undefined}>
+      <PopoverPrimitive.Root open={open} onOpenChange={v => canOpen && setOpen(v)}>
         <PopoverPrimitive.Trigger asChild>
           <button
             id={pickerId}
@@ -110,31 +130,24 @@ export function DatePicker({
             aria-invalid={error ? "true" : undefined}
             aria-describedby={error ? errorId : undefined}
             aria-disabled={disabled}
-            onClick={() => {
-              if (canOpen) setOpen((v) => !v)
-            }}
             className={cn(
               "flex h-10 w-full items-center gap-2 rounded-md border px-3 py-2",
               "text-sm text-left transition-colors outline-none",
-              // default
               "border-[var(--border)] bg-[var(--bg)]",
-              // focus
               "focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:border-[var(--accent)]",
-              // error
-              error && "border-red-500 focus-visible:ring-red-400",
-              // disabled
+              error    && "border-red-500 focus-visible:ring-red-400",
               disabled && "opacity-50 cursor-not-allowed",
-              // readonly
               readOnly && "bg-[var(--code-bg)] cursor-default"
             )}
           >
-            {readOnly ? (
-              <CalendarIcon className="h-4 w-4 text-[var(--text)] shrink-0 opacity-40" />
-            ) : (
-              <CalendarIcon className="h-4 w-4 text-[var(--text)] shrink-0" />
-            )}
+            <CalendarIcon
+              className={cn(
+                "h-4 w-4 shrink-0 text-[var(--text)]",
+                readOnly && "opacity-40"
+              )}
+            />
             <span className={cn(value ? "text-[var(--text-h)]" : "text-[var(--text)]")}>
-              {value ? format(value, "dd/MM/yyyy") : placeholder}
+              {value ? format(value, "dd MMMM yyyy", { locale: localeId }) : placeholder}
             </span>
           </button>
         </PopoverPrimitive.Trigger>
@@ -142,10 +155,10 @@ export function DatePicker({
         <PopoverPrimitive.Portal>
           <PopoverPrimitive.Content
             align="start"
-            sideOffset={4}
+            sideOffset={6}
             className={cn(
-              "z-50 rounded-md border border-[var(--border)] bg-[var(--bg)]",
-              "shadow-[var(--shadow)] p-3",
+              "z-50 rounded-xl border border-[var(--border)] bg-[var(--bg)]",
+              "shadow-[var(--shadow)] p-3 w-[300px]",
               "data-[state=open]:animate-in data-[state=closed]:animate-out",
               "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
               "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
@@ -155,58 +168,64 @@ export function DatePicker({
               mode="single"
               selected={value ?? undefined}
               onSelect={handleSelect}
+              month={month}
+              onMonthChange={setMonth}
               locale={localeId}
+              showOutsideDays
+              fixedWeeks
               disabled={[
                 ...(minDate ? [{ before: minDate }] : []),
-                ...(maxDate ? [{ after: maxDate }] : []),
+                ...(maxDate ? [{ after:  maxDate }] : []),
               ]}
-              classNames={{
-                root: "text-sm",
-                months: "flex flex-col",
-                month: "space-y-2",
-                caption: "flex justify-center items-center relative mb-1",
-                caption_label: "text-sm font-medium text-[var(--text-h)]",
-                nav: "flex items-center gap-1",
-                nav_button_previous: "absolute left-0",
-                nav_button_next: "absolute right-0",
-                table: "w-full border-collapse",
-                head_row: "flex",
-                head_cell:
-                  "text-[var(--text)] rounded-md w-9 font-normal text-[0.8rem] flex items-center justify-center",
-                row: "flex w-full mt-1",
-                cell: cn(
-                  "h-9 w-9 text-center text-sm relative",
-                  "focus-within:relative focus-within:z-20"
-                ),
-                day: cn(
-                  "h-9 w-9 p-0 font-normal rounded-md",
-                  "flex items-center justify-center",
-                  "hover:bg-[var(--accent-bg)] hover:text-[var(--text-h)]",
-                  "focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-                ),
-                day_selected:
-                  "bg-[var(--accent)] text-white hover:bg-[var(--accent)] hover:text-white",
-                day_today: "border border-[var(--accent)] text-[var(--accent)]",
-                day_outside: "opacity-30",
-                day_disabled: "opacity-30 cursor-not-allowed hover:bg-transparent",
-              }}
               components={{
-                PreviousMonthButton: (props) => (
+                /* Replace default caption with our dropdowns */
+                MonthCaption: ({ calendarMonth }) => (
+                  <CalendarCaption
+                    displayMonth={calendarMonth.date}
+                    onMonthChange={setMonth}
+                    minDate={minDate}
+                    maxDate={maxDate}
+                  />
+                ),
+                /* Custom prev / next buttons */
+                PreviousMonthButton: ({ onClick }) => (
                   <button
-                    {...props}
-                    className="h-7 w-7 flex items-center justify-center rounded-md border border-[var(--border)] hover:bg-[var(--accent-bg)] transition-colors"
+                    type="button"
+                    onClick={onClick}
+                    className="rdp-nav-btn"
+                    aria-label="Bulan sebelumnya"
                   >
-                    <ChevronLeft className="h-4 w-4 text-[var(--text)]" />
+                    <ChevronLeft className="h-4 w-4" />
                   </button>
                 ),
-                NextMonthButton: (props) => (
+                NextMonthButton: ({ onClick }) => (
                   <button
-                    {...props}
-                    className="h-7 w-7 flex items-center justify-center rounded-md border border-[var(--border)] hover:bg-[var(--accent-bg)] transition-colors"
+                    type="button"
+                    onClick={onClick}
+                    className="rdp-nav-btn"
+                    aria-label="Bulan berikutnya"
                   >
-                    <ChevronRight className="h-4 w-4 text-[var(--text)]" />
+                    <ChevronRight className="h-4 w-4" />
                   </button>
                 ),
+              }}
+              classNames={{
+                months:      "flex flex-col",
+                month:       "w-full",
+                month_grid:  "w-full border-collapse mt-2",
+                weekdays:    "flex",
+                weekday:     "rdp-weekday",
+                week:        "flex w-full",
+                day:         "rdp-day",
+                day_button:  "rdp-day-btn",
+                selected:    "rdp-day--selected",
+                today:       "rdp-day--today",
+                outside:     "rdp-day--outside",
+                disabled:    "rdp-day--disabled",
+                range_start: "rdp-day--selected",
+                range_end:   "rdp-day--selected",
+                hidden:      "invisible",
+                nav:         "rdp-nav",
               }}
             />
           </PopoverPrimitive.Content>
